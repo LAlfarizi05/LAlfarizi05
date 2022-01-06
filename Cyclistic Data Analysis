@@ -1,0 +1,246 @@
+---
+title: "Data Analysis Report"
+author: "Luthfy Alfarizi"
+date: "1/6/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This analysis is based on the Divvy case study "’Sophisticated, Clear, and Polished’: Divvy and Data Visualization" written by Kevin Hartman (found here: https://artscience.blog/home/divvy-dataviz-case-study). The purpose of this script is to consolidate downloaded Divvy data into a single dataframe and then conduct simple analysis to help answer the key question: “In what ways do members and casual riders use Divvy bikes differently?”
+
+
+
+## Setting up my work directory
+```{r setwd}
+setwd("C:/Users/dharm")
+```
+
+## ----
+
+Use this library in this script to analyzing data
+
+```{r library}
+library(tidyverse)
+library(lubridate)
+library(ggplot2)
+```
+
+# STEP 1 
+Collect the data from the database. The data is already in csv, so we just have to upload it right away to R.
+```{r read}
+q2_2019 <- read.csv("/Users/dharm/OneDrive/Desktop/Project 1/Divvy_trips_2019/Divvy_Trips_2019_Q2")
+q3_2019 <- read.csv("/Users/dharm/OneDrive/Desktop/Project 1/Divvy_trips_2019/Divvy_Trips_2019_Q3.csv")
+q4_2019 <- read.csv("/Users/dharm/OneDrive/Desktop/Project 1/Divvy_trips_2019/Divvy_Trips_2019_Q4.csv")
+q1_2020 <- read.csv("/Users/dharm/OneDrive/Desktop/Project 1/Divvy_trips_2019/Divvy_Trips_2020_Q1.csv")
+```
+
+# ---
+
+# STEP 2 
+WRANGLE DATA AND COMBINE IT INTO A SINGLE FILE
+Inspect the data and comparing with the other data.
+While the name of each data may contain various names furthermore not in the same sequence, we need to match each column name for ease of usage.
+```{r colnames}
+colnames(q2_2019)
+colnames(q3_2019)
+colnames(q4_2019)
+colnames(q1_2020)
+```
+
+Notice that the column name is not consistent with q1_2020. We have to change the column name to make it perfectly match as this will be required for the table design for Divvy.
+```{r rename}
+q4_2019 <- rename(q4_2019,
+		ride_id = trip_id,
+		rideable_type = bikeid,
+		started_at = start_time,
+		ended_at = end_time,
+		start_station_name = from_station_name,
+		start_station_id = from_station_id,
+		end_station_name = to_station_name,
+		end_station_id = to_station_id,
+		member_casual = usertype)
+
+q3_2019 <- rename(q3_2019,
+		ride_id = trip_id,
+		rideable_type = bikeid,
+		started_at = start_time,
+		ended_at = end_time,
+		start_station_name = from_station_name,
+		start_station_id = from_station_id,
+		end_station_name = to_station_name,
+		end_station_id = to_station_id,
+		member_casual = usertype)
+
+q2_2019 <- rename(q2_2019,
+		ride_id = "X01...Rental.Details.Rental.ID",
+		rideable_type = "X01...Rental.Details.Bike.ID",
+		started_at = "X01...Rental.Details.Local.Start.Time",
+		ended_at = "X01...Rental.Details.Local.End.Time",
+		start_station_name = "X03...Rental.Start.Station.Name",
+		start_station_id = "X03...Rental.Start.Station.ID",
+		end_station_name = "X02...Rental.End.Station.Name",
+		end_station_id = "X02...Rental.End.Station.ID",
+		member_casual = "User.Type")
+```
+
+## Inspect the data frames and look for inconsistency.
+```{r qqq}
+str(q1_2020)
+str(q4_2019)
+str(q3_2019)
+str(q2_2019)		
+```
+
+Check for the data type in all columns
+Convert variables in ride_id and rideable_type to character format as they could stack perfectly.
+```{r mutate}
+q4_2019 <- mutate(q4_2019, ride_id = as.character(ride_id),
+		rideable_type = as.character(ride_id))
+
+q3_2019 <- mutate(q3_2019, ride_id = as.character(ride_id),
+		rideable_type = as.character(ride_id))
+
+q2_2019 <- mutate(q2_2019, ride_id = as.character(ride_id),
+		rideable_type = as.character(ride_id))
+```
+
+Stack all the data into 3 single big data frame for further analysis
+```{r bind}
+all_trips <- bind_rows(q2_2019, q3_2019, q4_2019, q1_2020)
+```
+
+Remove the unnecessary column such as lat, long, birth year, and gender fields. As this data was dropped beginning in 2020
+```{r -c}
+all_trips <- all_trips %>%
+	select(-c(start_lat, start_lng, 
+	end_lat, 
+	end_lng, 
+	birthyear, 
+	gender, 
+	"X01...Rental.Details.Duration.In.Seconds.Uncapped", 
+	"X05...Member.Details.Member.Birthday.Year", 
+	"Member.Gender", 
+	"tripduration"))
+```
+
+# ---
+
+## STEP 3
+Inspect the newly created table
+```{r qqqq}
+str(all_trips)
+```
+
+```{r summary}
+summary(all_trips)
+```
+
+There are issues in the data frame
+1. In the "member_casual" column, there are inconsistencies in the attributes. There are two names for members ("members" and "Subscriber"), and also there are two names for casual riders ("Customer" and "casual"). We will need to consolidate that to two labels.
+2. The data can only be aggregated at the ride level, which is too granular. We will want to add some additional columns of data -- such as day, month, year, even timeclock -- that provide additional opportunities to aggregate the data.
+3. We need to add a calculated field for the length of the ride to compile the "tripduration" in a new column to the entire data frame for consistency.
+4. There are some rides where tripduration shows up as negative, including several hundred rides where Divvy took bikes out of circulation for Quality Control reasons. We will want to delete these rides.
+
+
+Reassign the desired values in the column "member_casual"
+```{r member_casual}
+all_trips <- all_trips %>% 
+mutate(member_casual = recode(member_casual,
+					"Subscriber" = "member",
+					"Customer" = "casual"))
+```
+
+Add columns that list the date, month, day, and year of each ride
+This will allow us to aggregate ride data for each month, day, year or timeclock ... before completing these operations we could only aggregate at the ride level
+
+```{r format}
+all_trips$date <- as.Date(all_trips$started_at)
+all_trips$month <- format(as.Date(all_trips$date), "%m")
+all_trips$day <- format(as.Date(all_trips$date), "%d")
+all_trips$year <- format(as.Date(all_trips$date), "%Y")
+all_trips$day_of_week <- format(as.Date(all_trips$date), "%A")
+all_trips$timeclock <- format(as.character(str_sub(all_trips$started_at, -8, -7))) 	
+all_trips$journey <- paste(all_trips$start_station_name, "-->", all_trips$end_station_name)
+```
+
+Add a "ride_length" calculation to all_trips (in seconds)
+```{r difftime}
+all_trips$ride_length <- difftime(all_trips$ended_at, all_trips$started_at)
+```
+
+Inspect the structure of the columns
+```{r str}
+str(all_trips)
+```
+
+Note that the column "ride_length" is still in factor format. Convert to numeric so we can run calculations on the data.
+
+```{r factor?}
+is.factor(all_trips$ride_length)
+```
+
+```{r ride length}
+all_trips$ride_length <- as.numeric(as.character(all_trips$ride_length))
+```
+
+Just want to make sure if it's already changed.
+```{r numeric?}
+is.numeric(all_trips$ride_length)
+```
+Next, we want to check if we have "bad data"
+First, we need to examine if we have a negative tripduration 
+
+```{r filter}
+all_trips %>%
+select(ride_length, ride_id) %>%
+filter(ride_length < 0)%>%
+summary()
+```
+
+
+
+We have 130 data where the ride_length is negative. We want to check the percentage of the bad data to the good data.
+```{r percentage}
+(all_trips %>%
+select(ride_length, ride_id) %>%
+filter(ride_length < 0) %>%
+nrow()) / (all_trips %>%
+select(ride_length, ride_id) %>%
+filter(ride_length > 0) %>%
+nrow()) * 100
+```
+
+Now that we know it's only 0,0034%, we could proceed to the next process
+Based on the information we have, we know that everything that goes into "HQ QR" was a bike taken out of docks and checked for quality.  We want to exclude the data from it
+We will create a new version of the data frame in the name all_trips_v2 that excluding the condition mentioned above
+
+```{r v2}
+all_trips_v2 <- all_trips[!(all_trips$start_station_name == "HQ QR"|all_trips$ride_length<0),]
+```
+
+Notice that the days of the week are out of order. Let's fix that.
+```{r days}
+all_trips_v2$day_of_week <- ordered(all_trips_v2$day_of_week, levels=c("Sunday", 							"Monday", 
+							"Tuesday", 
+							"Wednesday", 
+							"Thrusday", 
+							"Friday", 
+							"Saturday"))
+```
+
+Now we create a file to summarise our data to be visualize in Tableau
+```{count}
+counts <- all_trips_v2 %>%
+	mutate(weekday = wday(started_at, label = TRUE)) %>%  # creates weekday field using wday() %>%
+	select(member_casual, ride_length, start_station_name, timeclock, month, weekday) %>%
+  	group_by(member_casual, start_station_name, timeclock, month, weekday) %>%
+  	summarise(number_of_rides = n(), averages_duration = mean(ride_length)) %>%
+  	arrange(member_casual)
+```
+
+```{r write}
+write_csv(counts, file="avg_ride_length40.csv")
+```
